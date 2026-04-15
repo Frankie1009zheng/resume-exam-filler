@@ -86,15 +86,56 @@ with open('/tmp/resumes.txt', 'w') as f:
 - 从电话号位置往前 150 字符内查找最近的中文姓名
 - 匹配 `姓\s*[名甚]:\s*([\u4e00-\u9fa5]{2,4})` 模式（清理后文本中）
 
-**已知姓名替换表**（文件名为"先生/女士"时使用）
+**姓名全中文校验与规则**（必须执行）
+
+填入前检查姓名是否满足以下全部条件：
+1. 至少含 2 个中文字符
+2. 文件名截断导致的单字姓名（如"小满"）→ 从 PDF 文本提取真实姓名
+
+```python
+import re
+
+def is_valid_chinese_name(name):
+    if not name: return False
+    s = str(name)
+    # 1. Must contain Chinese characters
+    if not any('\u4e00' <= c <= '\u9fa5' for c in s): return False
+    # 2. Must be at least 2 Chinese chars (surname + given name)
+    cn_chars = [c for c in s if '\u4e00' <= c <= '\u9fa5']
+    if len(cn_chars) < 2: return False
+    return True
+
+# 从 PDF 文本提取真实姓名（覆盖截断/单字姓名）
+def get_real_name(text, fname):
+    # Step 1: 姓名：模式（清理噪声后）
+    t = re.sub(r'(.)\1{2,}', r'\1', text[:800])
+    m = re.search(r'姓\s*[名甚]:\s*([\u4e00-\u9fa5]{2,4})', t)
+    if m: return m.group(1)
+    # Step 2: 电话往前 150 字符内找最近中文名
+    m = re.search(r'1[3-9]\d{10}', text)
+    if m:
+        seg = text[max(0, m.start()-150):m.start()+10]
+        names = re.findall(r'[\u4e00-\u9fa5]{2,4}', seg)
+        skip = {'年龄','性别','姓名','工作','年限','经验','民族','籍贯','电话','手机','邮箱',
+                '汉族','中共','本科','硕士','博士','毕业','大学','学院','城市','求职','个人',
+                '简历','基本','信息','联系','居住','杭州','南京','北京','上海','研究生'}
+        for n in reversed(names):
+            if n not in skip and is_valid_chinese_name(n): return n
+    return name  # fallback
+```
+
+**已知姓名替换表**（文件名为"先生/女士"或截断单字时使用）
 ```python
 KNOWN_NAME_OVERRIDES = {
     '刘先生': '刘锦涛',
     '朱先生': '朱未斌',
     '罗先生': '罗京',
     '李先生': '李子军',
+    '小满':   '满振祯',
 }
 ```
+
+**同名不同人处理**：若多个候选人姓名相同但电话不同，视为不同人，用真实姓名替代；同一候选人已有记录则跳过不重复添加。
 
 **姓名全中文校验**：填入前检查姓名是否含中文字符，若为拼音/英文需从 PDF 文本重新提取真实姓名
 
